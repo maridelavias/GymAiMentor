@@ -5,7 +5,6 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![Telegram Bot](https://img.shields.io/badge/Telegram-Bot-blue.svg)](https://core.telegram.org/bots)
 [![GigaChat](https://img.shields.io/badge/AI-GigaChat-green.svg)](https://developers.sber.ru/gigachat)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## 🎯 О проекте
 
