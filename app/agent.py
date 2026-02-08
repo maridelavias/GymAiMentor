@@ -1,7 +1,7 @@
 import os
 import re
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 from gigachat import GigaChat
 from gigachat.models import Chat, Messages, MessagesRole
@@ -13,6 +13,76 @@ GIGACHAT_TEMPERATURE: float = float(os.getenv("GIGACHAT_TEMPERATURE", "0.35"))
 GIGACHAT_MAX_TOKENS: int = int(os.getenv("GIGACHAT_MAX_TOKENS", "5000"))
 GIGACHAT_TIMEOUT: int = int(os.getenv("GIGACHAT_TIMEOUT", "90"))
 GIGACHAT_RETRIES: int = int(os.getenv("GIGACHAT_RETRIES", "3"))
+
+
+def _to_float(v: Optional[object]) -> Optional[float]:
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(str(v).strip().replace(",", "."))
+    except (ValueError, TypeError):
+        return None
+
+
+def _sessions_per_week(schedule: Optional[object]) -> int:
+    if schedule is None:
+        return 0
+    if isinstance(schedule, int) and 0 <= schedule <= 7:
+        return schedule
+    try:
+        n = int(str(schedule).strip())
+        return n if 0 <= n <= 7 else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+def calc_kbju_mifflin_stjeor(
+    weight_kg: Optional[float],
+    height_cm: Optional[float],
+    age_years: Optional[float],
+    is_female: bool,
+    target: Optional[str],
+    sessions_per_week: int,
+) -> Optional[Tuple[int, int, int, int]]:
+    """
+    КБЖУ по Миффлину-Сан Жеора: БМ × КФА × цель, БЖУ 30% / 27.5% / 42.5%.
+    Возвращает (ккал, белок_г, жиры_г, углеводы_г) или None.
+    """
+    if weight_kg is None or height_cm is None or age_years is None:
+        return None
+    if weight_kg <= 0 or height_cm <= 0 or age_years <= 0:
+        return None
+
+    # БМ: женщины (10×вес)+(6.25×рост)-(5×возраст)-161; мужчины +5 вместо -161
+    bmr = (10 * weight_kg) + (6.25 * height_cm) - (5 * age_years) + (-161 if is_female else 5)
+
+    # КФА: 1.2 / 1.375 / 1.55 / 1.725
+    if sessions_per_week <= 0:
+        kfa = 1.2
+    elif sessions_per_week <= 2:
+        kfa = 1.375
+    elif sessions_per_week <= 4:
+        kfa = 1.55
+    else:
+        kfa = 1.725
+
+    tdee = bmr * kfa
+
+    target_lower = (target or "").strip().lower()
+    if "похуд" in target_lower or "сброс" in target_lower:
+        kcal = int(round(tdee * 0.9))  # дефицит ~10%
+    elif "набор" in target_lower or "масс" in target_lower:
+        kcal = int(round(tdee * 1.1))  # профицит ~10%
+    else:
+        kcal = int(round(tdee))
+
+    # БЖУ: белки 30%, жиры 27.5%, углеводы 42.5%
+    protein_g = int(round(kcal * 0.30 / 4))
+    fat_g = int(round(kcal * 0.275 / 9))
+    carbs_g = int(round(kcal * 0.425 / 4))
+    return (kcal, protein_g, fat_g, carbs_g)
 
 
 SYSTEM_PROMPT = """
@@ -213,30 +283,21 @@ QA_SYSTEM_PROMPT = """
 * Масла, соусы, мёд: в ложках — ч.л. (чайная ложка) или ст.л. (столовая ложка), например: оливковое масло 1 ст.л., не в граммах.
 
 РАСЧЁТ КБЖУ (ОБЯЗАТЕЛЬНО при любых планах питания и рекомендациях по калориям/БЖУ)
-Используй эти формулы и диапазоны. Не давай заниженный белок (1 г/кг — недостаточно для похудения с сохранением мышц и для активных людей).
+Используй формулу Миффлина-Сан Жеора и коэффициенты ниже. Если в анкете уже указано «Рекомендуемое КБЖУ: ккал/б/ж/у» — используй эти числа. Иначе считай по правилам:
 
-1) Калории (ккал/день):
-* Поддержание: ~25–30 ккал на кг текущего веса (ниже при низкой активности, выше при высокой).
-* Похудение: дефицит 15–25% от поддержания (обычно 20–22 ккал/кг или расчёт: (вес_кг × 22–24) при умеренной активности).
-* Набор массы: профицит 10–15% от поддержания.
+1) Базовый метаболизм (БМ), формула Миффлина-Сан Жеора:
+* Женщины: (10 × вес_кг) + (6.25 × рост_см) − (5 × возраст) − 161.
+* Мужчины: (10 × вес_кг) + (6.25 × рост_см) − (5 × возраст) + 5.
 
-2) Белок (г/день) — считать от текущего веса тела:
-* Похудение: 1,5–2,0 г/кг (не менее 1,5 г/кг для сохранения мышечной массы).
-* Набор массы: 1,6–2,2 г/кг.
-* Поддержание при тренировках: 1,4–1,8 г/кг.
-* Минимум для взрослых без тренировок: 1,2 г/кг.
-Запрещено рекомендовать 1 г/кг или ниже при цели похудения или при активных тренировках.
+2) Калории в день:
+* Умножить БМ на КФА (физическая активность): 1.2 — сидячий образ жизни; 1.375 — лёгкая (1–3 тренировки/нед); 1.55 — умеренная (3–5); 1.725 — интенсивные (5+).
+* Цель: похудение — умножить на 0.85–0.9 (дефицит 10–15%); набор массы — на 1.1–1.15; поддержание — не умножать.
 
-3) Углеводы (г/день) — от белка в граммах:
-* Похудение: белок + 10% (углеводы = 1,1 × белок г).
-* Поддержание: белок + 20% (углеводы = 1,2 × белок г).
-* Набор массы: белок + 30–40% (углеводы = 1,3–1,4 × белок г).
-
-4) Жиры (г/день):
-* Поддержание: не менее 1 г/кг веса тела, не более 1 г/кг (например при 65 кг — 65 г).
-* Похудение: 0,9–1 г/кг, не больше 1 г/кг (при 65 кг — 59–65 г, не 78 г и не выше).
-* Набор массы: не менее 0,9–1 г/кг.
-* В ответе пользователю — только итоговые граммы жиров, без пояснений в скобках.
+3) БЖУ в граммах (от итоговой калорийности):
+* Белки: 30% от ккал ÷ 4.
+* Жиры: 25–30% от ккал ÷ 9.
+* Углеводы: 40–45% от ккал ÷ 4.
+Не давай заниженный белок (минимум ~1.2 г/кг для взрослых, при похудении и тренировках — 1.5–2 г/кг). В ответе — только одна строка вида КБЖУ: ккал/белок г/жиры г/углеводы г, без блока расчёта и формул.
 
 ПРИНЦИПЫ
 * Безопасность важнее скорости прогресса.
@@ -493,6 +554,15 @@ class FitnessAgent:
             f"Частота тренировок: {d.get('schedule') or 'не указано'}\n"
             f"Уровень: {d.get('level') or 'не указано'}"
         )
+        # КБЖУ по Миффлину-Сан Жеора, если есть вес/рост/возраст/пол
+        w, h, a = _to_float(d.get("weight")), _to_float(d.get("height")), _to_float(d.get("age"))
+        gender = (d.get("gender") or "").strip().lower()
+        is_female = "жен" in gender
+        sessions = _sessions_per_week(d.get("schedule"))
+        kbju = calc_kbju_mifflin_stjeor(w, h, a, is_female, d.get("target"), sessions)
+        if kbju:
+            kcal, p, f, c = kbju
+            result += f"\nРекомендуемое КБЖУ (Миффлин-Сан Жеора): {kcal}/{p}/{f}/{c}"
         
         # группа мышц: из override («Другая программа») или из профиля
         preferred_group = focus_group_override if focus_group_override is not None else d.get('preferred_muscle_group')
