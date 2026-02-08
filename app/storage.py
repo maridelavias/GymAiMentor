@@ -5,6 +5,17 @@ import time
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
+try:
+    import psycopg
+except ImportError:
+    psycopg = None  # type: ignore
+
+# Northflank injects NF_GYM_DB_POSTGRES_URI; fallback for DATABASE_URL (e.g. local .env)
+def _get_database_url() -> Optional[str]:
+    return os.environ.get("NF_GYM_DB_POSTGRES_URI") or os.environ.get("DATABASE_URL")
+
+_USER_DATA_TABLE = "user_data"
+
 
 def validate_age(text: str) -> Tuple[bool, Optional[int], str]:
     """Проверяет корректность возраста. Возвращает (успех, значение, сообщение об ошибке)."""
@@ -74,6 +85,19 @@ DEFAULT_USER_DATA: Dict[str, Any] = {
 }
 
 
+def _pg_ensure_table(conn: "psycopg.Connection") -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_data (
+                user_id TEXT PRIMARY KEY,
+                data JSONB NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+    conn.commit()
+
+
 def _user_path(user_id: str, folder: str) -> Path:
     return Path(folder) / f"{user_id}.json"
 
@@ -129,38 +153,71 @@ def _ensure_structure(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def load_user_data(user_id: str, folder: str = "data/users") -> Dict[str, Any]:
     """
-    Безопасно читаем JSON. При ошибке парсинга/отсутствии файла — возвращаем дефолт.
+    Читаем данные пользователя из Postgres (если задан DATABASE_URL) или из JSON-файла.
     """
+    url = _get_database_url()
+    if url and psycopg:
+        try:
+            with psycopg.connect(url) as conn:
+                _pg_ensure_table(conn)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT data FROM user_data WHERE user_id = %s",
+                        (user_id,),
+                    )
+                    row = cur.fetchone()
+            if row is None:
+                return copy.deepcopy(DEFAULT_USER_DATA)
+            raw = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+            return _ensure_structure(raw)
+        except Exception:
+            return copy.deepcopy(DEFAULT_USER_DATA)
+
     path = _user_path(user_id, folder)
     if not path.exists():
         return copy.deepcopy(DEFAULT_USER_DATA)
-
     try:
         with path.open("r", encoding="utf-8") as f:
             raw = json.load(f)
     except (json.JSONDecodeError, OSError):
         return copy.deepcopy(DEFAULT_USER_DATA)
-
     return _ensure_structure(raw)
 
 
 def save_user_data(user_id: str, data: Dict[str, Any], folder: str = "data/users") -> None:
     """
-    Атомарная запись через временный файл: *.tmp → os.replace.
-    Параллельно нормализуем структуру.
+    Сохраняем в Postgres (если задан DATABASE_URL) или в JSON-файл.
     """
-    Path(folder).mkdir(parents=True, exist_ok=True)
     normalized = _ensure_structure(data)
 
+    url = _get_database_url()
+    if url and psycopg:
+        try:
+            payload = json.dumps(normalized, ensure_ascii=False)
+            with psycopg.connect(url) as conn:
+                _pg_ensure_table(conn)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO user_data (user_id, data)
+                        VALUES (%s, %s::jsonb)
+                        ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data
+                        """,
+                        (user_id, payload),
+                    )
+                conn.commit()
+        except Exception:
+            pass
+        return
+
+    Path(folder).mkdir(parents=True, exist_ok=True)
     path = _user_path(user_id, folder)
     tmp_path = path.with_suffix(".json.tmp")
-
     try:
         with tmp_path.open("w", encoding="utf-8") as f:
             json.dump(normalized, f, ensure_ascii=False, indent=4)
         os.replace(tmp_path, path)
     finally:
-        # на всякий случай почистим tmp, если что-то пошло не так
         if tmp_path.exists():
             try:
                 tmp_path.unlink()
@@ -293,8 +350,13 @@ def get_user_profile_text(user_id: str, folder: str = "data/users") -> str:
         "ноги": "🦵 Ноги",
         "ягодицы": "🍑 Ягодицы",
         "спина": "🔙 Спина",
+        "грудь": "🏋️ Грудь",
         "плечи и руки": "💪 Плечи и руки",
-        "сбалансированно": "🎲 Сбалансированно"
+        "плечи": "🦾 Плечи",
+        "руки": "🤜 Руки",
+        "кор и пресс": "🧘 Кор и пресс",
+        "функциональные и стабилизирующие": "🔄 Функциональные",
+        "сбалансированно": "🎲 Сбалансированно",
     }
     
     preferred = phys.get('preferred_muscle_group')
