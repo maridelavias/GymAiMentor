@@ -11,7 +11,7 @@ DEEPSEEK_API_KEY: str = (os.getenv("DEEPSEEK_API_KEY") or "").strip()
 DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip()
 DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip()
 DEEPSEEK_TEMPERATURE: float = float(os.getenv("DEEPSEEK_TEMPERATURE", "0.35"))
-DEEPSEEK_MAX_TOKENS: int = int(os.getenv("DEEPSEEK_MAX_TOKENS", "5000"))
+DEEPSEEK_MAX_TOKENS: int = int(os.getenv("DEEPSEEK_MAX_TOKENS", "8000"))
 DEEPSEEK_TIMEOUT: int = int(os.getenv("DEEPSEEK_TIMEOUT", "90"))
 DEEPSEEK_RETRIES: int = int(os.getenv("DEEPSEEK_RETRIES", "3"))
 
@@ -503,7 +503,6 @@ class FitnessAgent:
         from asyncio import to_thread
         messages = self._qa_history_messages(question)
         temperature_qa = min(0.55, max(0.45, DEEPSEEK_TEMPERATURE))
-        max_tokens_qa = min(2500, DEEPSEEK_MAX_TOKENS)
 
         def _chat_sync():
             client = OpenAI(api_key=self.token, base_url=DEEPSEEK_BASE_URL, timeout=DEEPSEEK_TIMEOUT)
@@ -511,7 +510,7 @@ class FitnessAgent:
                 model=DEEPSEEK_MODEL,
                 messages=messages,
                 temperature=temperature_qa,
-                max_tokens=max_tokens_qa,
+                max_tokens=DEEPSEEK_MAX_TOKENS,
                 stream=False,
             )
             return (resp.choices[0].message.content or "").strip()
