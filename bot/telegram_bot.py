@@ -382,7 +382,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start_time = time.time()
         
         try:
-            agent = FitnessAgent(token=os.getenv("GIGACHAT_TOKEN"), user_id=user_id)
+            agent = FitnessAgent(token=(os.getenv("DEEPSEEK_API_KEY") or os.getenv("GIGACHAT_TOKEN")), user_id=user_id)
             variation = variation_map[text]
             plan = await agent.get_program(
                 variation,
@@ -471,7 +471,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start_time = time.time()
         
         try:
-            agent = FitnessAgent(token=os.getenv("GIGACHAT_TOKEN"), user_id=user_id)
+            agent = FitnessAgent(token=(os.getenv("DEEPSEEK_API_KEY") or os.getenv("GIGACHAT_TOKEN")), user_id=user_id)
             answer = await agent.get_answer(text)
             
             answer_time = time.time() - start_time
@@ -922,7 +922,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         progress_msg = await update.message.reply_text("⏳ Спасибо! Формирую твою персональную программу…")
         start_time = time.time()
 
-        agent = FitnessAgent(token=os.getenv("GIGACHAT_TOKEN"), user_id=user_id)
+        agent = FitnessAgent(token=(os.getenv("DEEPSEEK_API_KEY") or os.getenv("GIGACHAT_TOKEN")), user_id=user_id)
         try:
             plan = await agent.get_program("")
             
@@ -961,7 +961,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Как тебя зовут?")
         return
 
-    agent = FitnessAgent(token=os.getenv("GIGACHAT_TOKEN"), user_id=user_id)
+    agent = FitnessAgent(token=(os.getenv("DEEPSEEK_API_KEY") or os.getenv("GIGACHAT_TOKEN")), user_id=user_id)
     try:
         plan = await agent.get_program(text)
     except Exception:

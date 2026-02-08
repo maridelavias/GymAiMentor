@@ -1,18 +1,19 @@
 import os
 import re
 import time
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
-from gigachat import GigaChat
-from gigachat.models import Chat, Messages, MessagesRole
+from openai import OpenAI
 
 from app.storage import load_user_data, save_user_data
 
-GIGACHAT_MODEL: str = os.getenv("GIGACHAT_MODEL", "GigaChat-2-Max").strip()
-GIGACHAT_TEMPERATURE: float = float(os.getenv("GIGACHAT_TEMPERATURE", "0.35"))
-GIGACHAT_MAX_TOKENS: int = int(os.getenv("GIGACHAT_MAX_TOKENS", "5000"))
-GIGACHAT_TIMEOUT: int = int(os.getenv("GIGACHAT_TIMEOUT", "90"))
-GIGACHAT_RETRIES: int = int(os.getenv("GIGACHAT_RETRIES", "3"))
+DEEPSEEK_API_KEY: str = (os.getenv("DEEPSEEK_API_KEY") or os.getenv("GIGACHAT_TOKEN") or "").strip()
+DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip()
+DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip()
+DEEPSEEK_TEMPERATURE: float = float(os.getenv("DEEPSEEK_TEMPERATURE", os.getenv("GIGACHAT_TEMPERATURE", "0.35")))
+DEEPSEEK_MAX_TOKENS: int = int(os.getenv("DEEPSEEK_MAX_TOKENS", os.getenv("GIGACHAT_MAX_TOKENS", "5000")))
+DEEPSEEK_TIMEOUT: int = int(os.getenv("DEEPSEEK_TIMEOUT", os.getenv("GIGACHAT_TIMEOUT", "90")))
+DEEPSEEK_RETRIES: int = int(os.getenv("DEEPSEEK_RETRIES", os.getenv("GIGACHAT_RETRIES", "3")))
 
 
 def _to_float(v: Optional[object]) -> Optional[float]:
@@ -433,43 +434,30 @@ class FitnessAgent:
         from asyncio import to_thread
         phys = self.user_data.get("physical_data") or {}
         phys_prompt = self._format_physical_data(phys, focus_group_override=focus_group_override)
-        payload = Chat(
-            messages=[
-                Messages(role=MessagesRole.SYSTEM, content=SYSTEM_PROMPT),
-                Messages(role=MessagesRole.USER, content=phys_prompt + (f"\n\nПожелания: {user_instruction}" if user_instruction else "")),
-            ],
-            temperature=GIGACHAT_TEMPERATURE,
-            max_tokens=GIGACHAT_MAX_TOKENS,
-            model=GIGACHAT_MODEL,
-        )
+        messages: List[dict[str, str]] = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": phys_prompt + (f"\n\nПожелания: {user_instruction}" if user_instruction else "")},
+        ]
 
         def _chat_sync():
             last_err = None
-            for attempt in range(1, GIGACHAT_RETRIES + 1):
+            client = OpenAI(api_key=self.token, base_url=DEEPSEEK_BASE_URL, timeout=DEEPSEEK_TIMEOUT)
+            for attempt in range(1, DEEPSEEK_RETRIES + 1):
                 try:
-                    try:
-                        with GigaChat(
-                            credentials=self.token,
-                            verify_ssl_certs=False,
-                            timeout=GIGACHAT_TIMEOUT,
-                            model=GIGACHAT_MODEL,
-                        ) as giga:
-                            resp = giga.chat(payload)
-                            return resp.choices[0].message.content
-                    except TypeError:
-                        with GigaChat(
-                            credentials=self.token,
-                            verify_ssl_certs=False,
-                            timeout=GIGACHAT_TIMEOUT,
-                        ) as giga:
-                            resp = getattr(giga, "chat")(payload, model=GIGACHAT_MODEL)
-                            return resp.choices[0].message.content
+                    resp = client.chat.completions.create(
+                        model=DEEPSEEK_MODEL,
+                        messages=messages,
+                        temperature=DEEPSEEK_TEMPERATURE,
+                        max_tokens=DEEPSEEK_MAX_TOKENS,
+                        stream=False,
+                    )
+                    return (resp.choices[0].message.content or "").strip()
                 except Exception as e:
                     last_err = e
-                    if attempt == GIGACHAT_RETRIES:
+                    if attempt == DEEPSEEK_RETRIES:
                         raise
                     time.sleep(1.5 * attempt)
-            raise last_err or RuntimeError("GigaChat call failed")
+            raise last_err or RuntimeError("DeepSeek call failed")
 
         txt = await to_thread(_chat_sync)
         cleaned = _strip_noise(txt)
@@ -486,10 +474,9 @@ class FitnessAgent:
         save_user_data(self.user_id, self.user_data)
         return final
 
-    def _qa_history_messages(self, current_question: str, max_turns: int = 6) -> list:
+    def _qa_history_messages(self, current_question: str, max_turns: int = 6) -> List[dict[str, str]]:
         """Последние пары вопрос–ответ из истории (только QA, без «Запрос программы») для контекста диалога."""
         hist = self.user_data.get("history", [])
-        # пары (user, assistant); запись программы — ("🧍 Запрос программы", "🤖 ..."), пропускаем
         turns = []
         for user_msg, bot_msg in hist:
             if user_msg == "🧍 Запрос программы":
@@ -497,16 +484,15 @@ class FitnessAgent:
             u = user_msg[2:] if user_msg.startswith("🧍 ") else user_msg
             b = bot_msg[2:] if bot_msg.startswith("🤖 ") else bot_msg
             turns.append((u, b))
-        # берём последние max_turns пар (не включая текущий вопрос)
         recent = turns[-max_turns:] if len(turns) > max_turns else turns
-        messages = [
-            Messages(role=MessagesRole.SYSTEM, content=QA_SYSTEM_PROMPT),
-            Messages(role=MessagesRole.USER, content=f"Анкета:\n{self._phys_prompt}"),
+        messages: List[dict[str, str]] = [
+            {"role": "system", "content": QA_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Анкета:\n{self._phys_prompt}"},
         ]
         for u, b in recent:
-            messages.append(Messages(role=MessagesRole.USER, content=u))
-            messages.append(Messages(role=MessagesRole.ASSISTANT, content=b))
-        messages.append(Messages(role=MessagesRole.USER, content=f"Вопрос (текущий):\n{current_question}"))
+            messages.append({"role": "user", "content": u})
+            messages.append({"role": "assistant", "content": b})
+        messages.append({"role": "user", "content": f"Вопрос (текущий):\n{current_question}"})
         return messages
 
     async def get_answer(self, question: str) -> str:
@@ -516,23 +502,19 @@ class FitnessAgent:
         """
         from asyncio import to_thread
         messages = self._qa_history_messages(question)
-        payload = Chat(
-            messages=messages,
-            temperature=min(0.55, max(0.45, GIGACHAT_TEMPERATURE)),  # чуть выше для живого дружеского тона
-            max_tokens=min(2500, GIGACHAT_MAX_TOKENS),
-            model=GIGACHAT_MODEL,
-        )
+        temperature_qa = min(0.55, max(0.45, DEEPSEEK_TEMPERATURE))
+        max_tokens_qa = min(2500, DEEPSEEK_MAX_TOKENS)
 
         def _chat_sync():
-            try:
-                with GigaChat(credentials=self.token, verify_ssl_certs=False, timeout=GIGACHAT_TIMEOUT) as giga:
-                    try:
-                        resp = giga.chat(payload)
-                    except TypeError:
-                        resp = getattr(giga, "chat")(payload, model=GIGACHAT_MODEL)
-                    return resp.choices[0].message.content
-            except Exception as e:
-                raise e
+            client = OpenAI(api_key=self.token, base_url=DEEPSEEK_BASE_URL, timeout=DEEPSEEK_TIMEOUT)
+            resp = client.chat.completions.create(
+                model=DEEPSEEK_MODEL,
+                messages=messages,
+                temperature=temperature_qa,
+                max_tokens=max_tokens_qa,
+                stream=False,
+            )
+            return (resp.choices[0].message.content or "").strip()
 
         txt = await to_thread(_chat_sync)
         cleaned = _strip_noise(txt).strip()

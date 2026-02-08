@@ -1,4 +1,4 @@
-gigachat
+openai>=1.0
 python-telegram-bot==20.7
 python-dotenv>=1.0
 reportlab>=3.6
