@@ -191,6 +191,7 @@ QA_SYSTEM_PROMPT = """
     * объясняй, зачем они нужны или не нужны
     * не обещай магических эффектов
     * указывай базовые дозировки и условия приёма
+* ❗ КОНТЕКСТ ЗАПРОСА: если в предыдущих сообщениях пользователь просил план питания, меню на N дней или рацион — его следующие сообщения (ответы на твои уточняющие вопросы, дополнения) относятся к ЭТОМУ ЖЕ запросу. Отвечай именно планом питания/меню, а НЕ программой тренировок.
 
 ПРИНЦИПЫ
 * Безопасность важнее скорости прогресса.
@@ -325,16 +326,38 @@ class FitnessAgent:
         save_user_data(self.user_id, self.user_data)
         return final
 
+    def _qa_history_messages(self, current_question: str, max_turns: int = 6) -> list:
+        """Последние пары вопрос–ответ из истории (только QA, без «Запрос программы») для контекста диалога."""
+        hist = self.user_data.get("history", [])
+        # пары (user, assistant); запись программы — ("🧍 Запрос программы", "🤖 ..."), пропускаем
+        turns = []
+        for user_msg, bot_msg in hist:
+            if user_msg == "🧍 Запрос программы":
+                continue
+            u = user_msg[2:] if user_msg.startswith("🧍 ") else user_msg
+            b = bot_msg[2:] if bot_msg.startswith("🤖 ") else bot_msg
+            turns.append((u, b))
+        # берём последние max_turns пар (не включая текущий вопрос)
+        recent = turns[-max_turns:] if len(turns) > max_turns else turns
+        messages = [
+            Messages(role=MessagesRole.SYSTEM, content=QA_SYSTEM_PROMPT),
+            Messages(role=MessagesRole.USER, content=f"Анкета:\n{self._phys_prompt}"),
+        ]
+        for u, b in recent:
+            messages.append(Messages(role=MessagesRole.USER, content=u))
+            messages.append(Messages(role=MessagesRole.ASSISTANT, content=b))
+        messages.append(Messages(role=MessagesRole.USER, content=f"Вопрос (текущий):\n{current_question}"))
+        return messages
+
     async def get_answer(self, question: str) -> str:
         """
         Краткий структурированный ответ/совет. Если явно просят план — можно выдать план (учитывая анкету).
+        Учитывает последние реплики диалога (история QA), чтобы не терять контекст (например, запрос меню на 7 дней).
         """
         from asyncio import to_thread
+        messages = self._qa_history_messages(question)
         payload = Chat(
-            messages=[
-                Messages(role=MessagesRole.SYSTEM, content=QA_SYSTEM_PROMPT),
-                Messages(role=MessagesRole.USER, content=f"Анкета:\n{self._phys_prompt}\n\nВопрос:\n{question}"),
-            ],
+            messages=messages,
             temperature=min(0.35, GIGACHAT_TEMPERATURE),
             max_tokens=min(2500, GIGACHAT_MAX_TOKENS),
             model=GIGACHAT_MODEL,

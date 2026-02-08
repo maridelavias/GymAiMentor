@@ -500,6 +500,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Answer sent to user {user_id}, length: {len(answer)} chars")
         
         await _safe_send(update.effective_chat, answer, use_markdown=True)
+        footer = f"{name}, выбери дальнейшее действие ⬇️" if name else "Выбери дальнейшее действие ⬇️"
+        await update.effective_chat.send_message(footer, reply_markup=MAIN_KEYBOARD)
         return
 
     # имя
