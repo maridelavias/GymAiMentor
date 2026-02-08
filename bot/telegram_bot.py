@@ -382,7 +382,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start_time = time.time()
         
         try:
-            agent = FitnessAgent(token=(os.getenv("DEEPSEEK_API_KEY") or os.getenv("GIGACHAT_TOKEN")), user_id=user_id)
+            agent = FitnessAgent(token=os.getenv("DEEPSEEK_API_KEY"), user_id=user_id)
             variation = variation_map[text]
             plan = await agent.get_program(
                 variation,
@@ -460,6 +460,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "❓ Задать вопрос AI-тренеру":
         user_states[user_id] = {"mode": "qa", "step": 0, "data": {}}
+        # Сброс истории диалога: для ответа учитываются только анкета (профиль, цели, уровень) и новый вопрос
+        data = load_user_data(user_id)
+        data["history"] = []
+        save_user_data(user_id, data)
         await update.message.reply_text("Задай вопрос по тренировкам/питанию ✍🏼")
         logger.info(f"User {user_id} ({name}) entered Q&A mode")
         return
@@ -471,7 +475,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start_time = time.time()
         
         try:
-            agent = FitnessAgent(token=(os.getenv("DEEPSEEK_API_KEY") or os.getenv("GIGACHAT_TOKEN")), user_id=user_id)
+            agent = FitnessAgent(token=os.getenv("DEEPSEEK_API_KEY"), user_id=user_id)
             answer = await agent.get_answer(text)
             
             answer_time = time.time() - start_time
@@ -500,7 +504,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Answer sent to user {user_id}, length: {len(answer)} chars")
         
         await _safe_send(update.effective_chat, answer, use_markdown=True)
-        footer = f"{name}, выбери дальнейшее действие ⬇️" if name else "Выбери дальнейшее действие ⬇️"
+        footer = f"{name}, выбери дальнейшее действие или продолжи диалог с AI-тренером ⬇️" if name else "Выбери дальнейшее действие или продолжи диалог с AI-тренером ⬇️"
         await update.effective_chat.send_message(footer, reply_markup=MAIN_KEYBOARD)
         return
 
@@ -922,7 +926,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         progress_msg = await update.message.reply_text("⏳ Спасибо! Формирую твою персональную программу…")
         start_time = time.time()
 
-        agent = FitnessAgent(token=(os.getenv("DEEPSEEK_API_KEY") or os.getenv("GIGACHAT_TOKEN")), user_id=user_id)
+        agent = FitnessAgent(token=os.getenv("DEEPSEEK_API_KEY"), user_id=user_id)
         try:
             plan = await agent.get_program("")
             
@@ -961,7 +965,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Как тебя зовут?")
         return
 
-    agent = FitnessAgent(token=(os.getenv("DEEPSEEK_API_KEY") or os.getenv("GIGACHAT_TOKEN")), user_id=user_id)
+    agent = FitnessAgent(token=os.getenv("DEEPSEEK_API_KEY"), user_id=user_id)
     try:
         plan = await agent.get_program(text)
     except Exception:

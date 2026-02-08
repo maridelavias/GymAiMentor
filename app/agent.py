@@ -7,13 +7,13 @@ from openai import OpenAI
 
 from app.storage import load_user_data, save_user_data
 
-DEEPSEEK_API_KEY: str = (os.getenv("DEEPSEEK_API_KEY") or os.getenv("GIGACHAT_TOKEN") or "").strip()
+DEEPSEEK_API_KEY: str = (os.getenv("DEEPSEEK_API_KEY") or "").strip()
 DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip()
 DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip()
-DEEPSEEK_TEMPERATURE: float = float(os.getenv("DEEPSEEK_TEMPERATURE", os.getenv("GIGACHAT_TEMPERATURE", "0.35")))
-DEEPSEEK_MAX_TOKENS: int = int(os.getenv("DEEPSEEK_MAX_TOKENS", os.getenv("GIGACHAT_MAX_TOKENS", "5000")))
-DEEPSEEK_TIMEOUT: int = int(os.getenv("DEEPSEEK_TIMEOUT", os.getenv("GIGACHAT_TIMEOUT", "90")))
-DEEPSEEK_RETRIES: int = int(os.getenv("DEEPSEEK_RETRIES", os.getenv("GIGACHAT_RETRIES", "3")))
+DEEPSEEK_TEMPERATURE: float = float(os.getenv("DEEPSEEK_TEMPERATURE", "0.35"))
+DEEPSEEK_MAX_TOKENS: int = int(os.getenv("DEEPSEEK_MAX_TOKENS", "5000"))
+DEEPSEEK_TIMEOUT: int = int(os.getenv("DEEPSEEK_TIMEOUT", "90"))
+DEEPSEEK_RETRIES: int = int(os.getenv("DEEPSEEK_RETRIES", "3"))
 
 
 def _to_float(v: Optional[object]) -> Optional[float]:
@@ -201,7 +201,7 @@ SYSTEM_PROMPT = """
 
 
 QA_SYSTEM_PROMPT = """
-Роль: Ты — персональный тренер и консультант (опыт 8+ лет), который общается с пользователем как друг и бадди: опора, поддержка, «свой человек» в теме тренировок и питания. Ты профессионально разбираешься в силовых тренировках, кардио, функциональном тренинге, беге, йоге, домашних тренировках, восстановлении, питании и спортивных добавках.
+Роль: Ты — персональный тренер и эксперт-нутрициолог (опыт 8+ лет), который общается с пользователем как друг и бадди: опора, поддержка, «свой человек» в теме тренировок и питания. Ты профессионально разбираешься в силовых тренировках, кардио, функциональном тренинге, беге, йоге, домашних тренировках, восстановлении, питании и спортивных добавках.
 
 Тон общения:
 * Неформальный, дружеский, тёплый — как с приятелем, который в теме и всегда на твоей стороне.
@@ -474,7 +474,7 @@ class FitnessAgent:
         save_user_data(self.user_id, self.user_data)
         return final
 
-    def _qa_history_messages(self, current_question: str, max_turns: int = 6) -> List[dict[str, str]]:
+    def _qa_history_messages(self, current_question: str, max_turns: int = 10) -> List[dict[str, str]]:
         """Последние пары вопрос–ответ из истории (только QA, без «Запрос программы») для контекста диалога."""
         hist = self.user_data.get("history", [])
         turns = []
