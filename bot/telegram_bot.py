@@ -320,35 +320,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "🆕 Другая программа":
-        # показываем меню выбора группы мышц
-        await update.message.reply_text(
-            "Выбери акцент программы на группу мышц ⬇️",
-            reply_markup=MUSCLE_GROUPS_KEYBOARD
-        )
-        return
-
-    muscle_groups_map = {
-        "🦵 Упор на ноги": "ноги",
-        "🍑 Упор на ягодицы": "ягодицы",
-        "🔙 Упор на спину": "спина",
-        "🏋️ Упор на грудь": "грудь",
-        "💪 Упор на плечи и руки": "плечи и руки",
-        "🦾 Упор только на плечи": "плечи",
-        "🤜 Упор только на руки": "руки",
-        "🧘 Кор и пресс": "кор и пресс",
-        "🔄 Функциональные": "функциональные и стабилизирующие",
-        "🎲 Сбалансированная программа": "сбалансированно",
-    }
-    
-    if text in muscle_groups_map and state.get("mode") not in ["awaiting_muscle_group", "editing_muscle_group"]:
+        if not completed:
+            await update.message.reply_text(
+                "Сначала заполни анкету — тогда сможешь запрашивать другие программы.",
+                reply_markup=MAIN_KEYBOARD,
+            )
+            return
+        # сразу меню стиля тренировок; группа мышц — из профиля
+        muscle_from_profile = phys.get("preferred_muscle_group") or "сбалансированно"
         user_states[user_id] = {
-            "mode": "choosing_variation", 
-            "step": 0, 
-            "data": {"muscle_group": muscle_groups_map[text]}
+            "mode": "choosing_variation",
+            "step": 0,
+            "data": {"muscle_group": muscle_from_profile},
         }
         await update.message.reply_text(
-            f"Супер! Программа с акцентом на {muscle_groups_map[text]}.\n\nТеперь выбери стиль тренировок ⬇️",
-            reply_markup=VARIATIONS_KEYBOARD
+            "Выбери стиль тренировок ⬇️",
+            reply_markup=VARIATIONS_KEYBOARD,
         )
         return
 
